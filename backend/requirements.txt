@@ -1,0 +1,34 @@
+# FastAPI & ASGI server
+fastapi==0.110.0
+uvicorn==0.27.1
+pydantic==2.6.1
+pydantic-settings==2.1.0
+python-dotenv==1.0.1
+
+# Database
+sqlalchemy==2.0.27
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Authentication
+python-jose==3.3.0
+passlib==1.7.4
+python-multipart==0.0.9
+bcrypt==4.1.2
+
+# Cloud Providers SDK
+boto3==1.34.51            # AWS SDK
+google-cloud-compute==1.15.0  # GCP Compute Engine
+google-auth==2.27.0
+
+# Terraform
+python-terraform==0.10.1
+
+# Utilities
+cryptography==42.0.2      # For encryption of credentials
+requests==2.31.0
+python-slugify==8.0.4
+pycryptodome==3.19.1
+
+# CORS
+starlette==0.36.3
