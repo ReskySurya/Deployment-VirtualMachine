@@ -220,74 +220,127 @@ async def validate_credential(
             detail=f"Error decrypting credentials: {str(e)}"
         )
     
+    # Menyiapkan log untuk debug
+    logger.debug(f"Validating credential type: {credential.type}")
+    logger.debug(f"Decrypted data keys: {decrypted_data.keys()}")
+    
     # Validate with cloud provider
     try:
         if credential.type == CredentialType.AWS:
-            # Code to validate AWS credentials would go here
-            # For example, using boto3 to list regions
+            # Code to validate AWS credentials
             import boto3
-            from botocore.exceptions import ClientError
+            from botocore.exceptions import ClientError, NoCredentialsError
             
             try:
-                session = boto3.Session(
-                    aws_access_key_id=decrypted_data["aws_access_key_id"],
-                    aws_secret_access_key=decrypted_data["aws_secret_access_key"],
-                    region_name=decrypted_data["aws_region"]
-                )
-                ec2 = session.client('ec2')
-                ec2.describe_regions()  # This will fail if credentials are invalid
+                # Cek kunci yang ada di data terenkripsi
+                aws_access_key = decrypted_data.get('access_key') or decrypted_data.get('aws_access_key_id')
+                aws_secret_key = decrypted_data.get('secret_key') or decrypted_data.get('aws_secret_access_key') 
+                aws_region = decrypted_data.get('region') or decrypted_data.get('aws_region')
                 
-                return {"valid": True, "message": "AWS credentials validated successfully"}
+                if not aws_access_key:
+                    return {"valid": False, "message": "Validation failed: 'aws_access_key_id'"}
+                    
+                if not aws_secret_key:
+                    return {"valid": False, "message": "Validation failed: 'aws_secret_access_key'"}
+                    
+                if not aws_region:
+                    return {"valid": False, "message": "Validation failed: 'aws_region'"}
+                
+                logger.debug(f"Using AWS credentials with region: {aws_region}")
+                
+                # Buat sesi dengan kredensial
+                session = boto3.Session(
+                    aws_access_key_id=aws_access_key,
+                    aws_secret_access_key=aws_secret_key,
+                    region_name=aws_region
+                )
+                
+                # Coba akses layanan EC2 untuk validasi
+                ec2 = session.client('ec2')
+                ec2.describe_regions()  # Ini akan gagal jika kredensial tidak valid
+                
+                return {"valid": True, "message": "Kredensial AWS berhasil divalidasi"}
+                
             except ClientError as e:
                 error_code = e.response.get('Error', {}).get('Code', 'Unknown')
                 error_message = e.response.get('Error', {}).get('Message', str(e))
+                logger.error(f"AWS validation error: {error_code} - {error_message}")
                 return {
                     "valid": False, 
-                    "message": f"AWS validation failed: {error_code} - {error_message}"
+                    "message": f"Validasi AWS gagal: {error_code} - {error_message}"
+                }
+            except NoCredentialsError:
+                logger.error("AWS validation error: No credentials provided")
+                return {
+                    "valid": False,
+                    "message": "Validasi AWS gagal: Kredensial tidak ditemukan"
+                }
+            except Exception as e:
+                logger.error(f"Unexpected AWS validation error: {str(e)}")
+                return {
+                    "valid": False,
+                    "message": f"Validasi AWS gagal: {str(e)}"
                 }
             
         elif credential.type == CredentialType.GCP:
-            # Code to validate GCP credentials would go here
-            # For example, using google-auth and google-cloud-compute
+            # Code to validate GCP credentials
             from google.oauth2 import service_account
-            from google.cloud import compute_v1
-            from google.api_core.exceptions import GoogleAPIError
+            from google.cloud import storage
+            import json
             
             try:
-                credentials = service_account.Credentials.from_service_account_info(
-                    decrypted_data["gcp_service_account_json"]
-                )
+                # Cek format kredensial GCP
+                if 'gcp_service_account_json' in decrypted_data:
+                    # Format lengkap dari file JSON
+                    service_account_info = decrypted_data['gcp_service_account_json']
+                else:
+                    # Format dari input manual
+                    service_account_info = {
+                        "type": "service_account",
+                        "project_id": decrypted_data.get('project_id'),
+                        "private_key_id": decrypted_data.get('private_key_id'),
+                        "private_key": decrypted_data.get('private_key'),
+                        "client_email": decrypted_data.get('client_email'),
+                        "client_id": decrypted_data.get('client_id'),
+                        "auth_uri": decrypted_data.get('auth_uri', "https://accounts.google.com/o/oauth2/auth"),
+                        "token_uri": decrypted_data.get('token_uri', "https://oauth2.googleapis.com/token"),
+                        "auth_provider_x509_cert_url": decrypted_data.get('auth_provider_x509_cert_url', 
+                                                        "https://www.googleapis.com/oauth2/v1/certs"),
+                        "client_x509_cert_url": decrypted_data.get('client_x509_cert_url', "")
+                    }
                 
-                # Test listing zones in the project
-                client = compute_v1.ZonesClient(credentials=credentials)
-                client.list(project=decrypted_data["gcp_project_id"], max_results=1)
+                # Validasi field-field penting
+                for field in ['project_id', 'private_key', 'client_email']:
+                    if not service_account_info.get(field):
+                        return {"valid": False, "message": f"Validation failed: '{field}'"}
                 
-                return {"valid": True, "message": "GCP credentials validated successfully"}
-            except GoogleAPIError as e:
+                # Buat kredensial dari informasi service account
+                credentials = service_account.Credentials.from_service_account_info(service_account_info)
+                
+                # Validasi dengan mencoba mengakses layanan Storage
+                storage_client = storage.Client(credentials=credentials, project=service_account_info['project_id'])
+                # Coba list buckets (hanya mengecek koneksi)
+                storage_client.list_buckets(max_results=1)
+                
+                return {"valid": True, "message": "Kredensial GCP berhasil divalidasi"}
+                
+            except Exception as e:
+                logger.error(f"GCP validation error: {str(e)}")
                 return {
-                    "valid": False, 
-                    "message": f"GCP validation failed: {str(e)}"
+                    "valid": False,
+                    "message": f"Validasi GCP gagal: {str(e)}"
                 }
-            except ValueError as e:
-                return {
-                    "valid": False, 
-                    "message": f"Invalid GCP service account JSON: {str(e)}"
-                }
-        
         else:
             return {
-                "valid": False, 
-                "message": f"Unsupported credential type: {credential.type}"
+                "valid": False,
+                "message": f"Tipe kredensial tidak didukung: {credential.type}"
             }
-            
-    except ImportError as e:
-        # Handle case where required libraries are not installed
-        return {
-            "valid": False, 
-            "message": f"Required library not installed: {str(e)}"
-        }
     except Exception as e:
-        return {"valid": False, "message": f"Validation failed: {str(e)}"}
+        logger.error(f"Unexpected error in credential validation: {str(e)}")
+        return {
+            "valid": False,
+            "message": f"Validasi gagal: {str(e)}"
+        }
 
 @router.get("/{credential_id}/details", response_model=Dict[str, Any])
 async def get_credential_details(

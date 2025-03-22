@@ -32,3 +32,5 @@ pycryptodome==3.19.1
 
 # CORS
 starlette==0.36.3
+google-cloud-storage 
+google-auth
